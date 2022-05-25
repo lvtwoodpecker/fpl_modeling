@@ -6,7 +6,6 @@ output: html_notebook
 
 ```{r}
 library(dplyr)
-read.csv("data/fbref/games_players.csv")
 matchdat <- read.csv("https://projects.fivethirtyeight.com/soccer-api/club/spi_matches.csv")
 ```
 
@@ -134,6 +133,11 @@ fix20 <- get_game_list(season = 20)
 season18 <- get_player_details(season = 18)
 season19 <- get_player_details(season = 19)
 season20 <- get_player_details(season = 20)
+```
 
-season20
+``` {r}
+season20 %>% relocate(playername, .before = fixture)
+
+read.csv("data/fbref/games_players.csv")
+
 ```
