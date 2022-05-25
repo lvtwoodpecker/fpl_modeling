@@ -1,0 +1,139 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(dplyr)
+read.csv("data/fbref/games_players.csv")
+matchdat <- read.csv("https://projects.fivethirtyeight.com/soccer-api/club/spi_matches.csv")
+```
+
+``` {r}
+## calaculating what the average performances 
+
+homeav <- matchdat %>% filter(league_id == 2411) %>% #working out the average home xg 
+                          summarise(avfor = mean(xg1, na.rm = T), avag = mean(xg2, na.rm = T)) 
+
+
+
+homfor <- homeav[[1]] # extracting the number for home and away
+
+
+homeag <- homeav[[2]]
+
+
+# comparing each teams performance to average for xg for and against
+home_rating_data <- matchdat %>% filter(league_id == 2411) %>%
+                        group_by(team1) %>%
+                        summarise(avfor = mean(xg1, na.rm = T), avag = mean(xg2, na.rm = T)) %>% 
+                        mutate(xgfh = avfor - homfor, xgah = avag - homeag) %>%
+                        select(team1, xgfh, xgah)
+
+away_rating_data <- matchdat %>% filter(league_id == 2411) %>%
+                        group_by(team2) %>%
+                        summarise(avfor = mean(xg1, na.rm = T), avag = mean(xg2, na.rm = T)) %>% 
+                        mutate(xgfa = avfor - homfor, xgaa = avag - homeag) %>%
+                        select(team2, xgfa, xgaa)
+
+## creating a data frame with matches the for and against scores and the xg deltas 
+matches <- matchdat %>% filter(league_id == 2411) %>%
+                              left_join(home_rating_data, by = "team1") %>%
+                              left_join(away_rating_data, by = "team2") %>%
+                              mutate(deltafh =  xgfh + xgaa, deltagh = xgah+xgfa) %>%
+                              select(season, score1, score2, deltafh, deltagh)
+
+matches
+```
+
+``` {r}
+## splitting it up for home and away
+
+mat1 <- matches %>% select(season, score1, deltafh) %>%
+                      mutate(loc = "home")
+colnames(mat1)[2] <- "score"
+colnames(mat1)[3] <- "delta"
+mat2 <- matches %>% select(season, score2, deltagh) %>%
+                      mutate(loc = "away")
+colnames(mat2)[2] <- "score"
+colnames(mat2)[3] <- "delta"
+
+
+## putting it together and creating the score as a factor
+matall <- mat1 %>% bind_rows(mat2) %>%
+                   mutate(scorecat = as.factor(if_else(score > 5,"5", as.character(score)))) %>% ### rating from 0 to 5. 5 being biggest score
+                   select(-score, -season) ### data for calculating the chance of goals scored 
+
+matall
+```
+``` {r}
+library(tidymodels)
+
+##splitting the data into training and testing
+score_split <- initial_split(matall, prop = 0.9, strata = scorecat) 
+score_train <- training(score_split)
+score_test <- testing(score_split)
+
+## creating the classification random forest
+rand1 <- rand_forest() %>% #type of model 
+                set_engine("randomForest") %>% #  engine used to fit the model
+                  set_mode("classification") %>%
+                  fit(scorecat ~., data = score_train)
+```
+
+``` {r}
+### random forest output
+
+rand1
+```
+
+``` {r}
+### filtering the matches to test the model on 
+
+matches_test <- matchdat %>% filter(league_id == 2411) %>%
+                              left_join(home_rating_data, by = "team1") %>%
+                               left_join(away_rating_data, by = "team2") %>%
+                                  mutate(deltafh =  xgfh + xgaa, deltagh = xgah+xgfa) %>%
+                                    filter(season == 2020)
+
+match20_h <- matches_test %>% select(deltafh, score1) %>% 
+                                mutate(loc = "home")
+
+match20_a <- matches_test %>% select(deltagh, score2) %>%
+                                mutate(loc = "away")
+
+colnames(match20_h)[1] <- "delta"
+colnames(match20_h)[2] <- "score"
+
+colnames(match20_a)[1] <- "delta"
+colnames(match20_a)[2] <- "score"
+
+match20 <- match20_h %>% bind_rows(match20_a)
+
+match20 <- match20 %>% bind_rows(match20) %>%
+                   mutate(scorecat = as.factor(if_else(score > 5,"5", as.character(score)))) %>% ### rating from 0 to 5. 5 being biggest score
+                   select(-score) ### data for calculating the chance of goals scored 
+
+match20
+```
+
+``` {r}
+library(caret)
+score_test$scorecat <- as.factor(score_test$scorecat)
+x <- predict(rand1, score_test, type = "prob")
+
+match20_pred  <- match20 %>% bind_cols(x)
+match20_pred
+```
+
+``` {r}
+library(fplscrapR)
+fix20 <- get_game_list(season = 20)
+
+season18 <- get_player_details(season = 18)
+season19 <- get_player_details(season = 19)
+season20 <- get_player_details(season = 20)
+
+season20
+```
