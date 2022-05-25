@@ -1,0 +1,140 @@
+---
+title: "Football_FIFA data"
+output: html_document
+---
+
+```{r}
+set.seed(442)
+fbref = read.csv("EPL_data.csv")
+no_gk = fbref[fbref$Pos != "GK",]
+no_gk = no_gk[sample(1:nrow(no_gk)), ]
+no_gk = no_gk[-c(1, 2, 3, 5, 9, 10, 11, 14, 19, 24, 26)]
+
+idx_test<-(1:(nrow(no_gk)/4))*4
+train_fbref<-no_gk[-idx_test,]
+test_fbref<-no_gk[idx_test,]
+train_fbref
+```
+
+```{r}
+lm_basic = lm(Gls ~ ., train_fbref)
+
+summary(lm_basic)
+
+pred_lm <- predict(lm_basic, newdata = test_fbref)
+mean((pred_lm - test_fbref$Gls)^2)
+```
+
+``` {r}
+library(MASS)
+aic = stepAIC(lm_basic,
+        direction = "backward", trace = 0)
+
+summary(aic)
+pred_aic <- predict(aic, newdata = test_fbref)
+mean((pred_aic - test_fbref$Gls)^2)
+```
+
+``` {r}
+## single-hidden-layer nn
+## multiplayer: package neuralnet, but need to tune/CV manually
+library(nnet)
+set.seed(442)
+nn_goal_scored <- nnet(Gls~Sh + SoT + PKatt + xG + npxG + TklMid.3rd + PressMid.3rd + Int, data = train_fbref, size = 10, decay=0.0001,
+linout = TRUE,
+trace=F,
+maxit = 3000)
+```
+
+``` {r}
+library(caret)
+pred_nn1 <- predict(nn_goal_scored, newdata = test_fbref, type="raw")
+mean((pred_nn1 - test_fbref$Gls)^2)
+
+order = order(varImp(nn_goal_scored)$Overall, decreasing=TRUE)
+
+data.frame(V1=sort(varImp(nn_goal_scored)$Overall, decreasing=TRUE), V2 = rownames(varImp(nn_goal_scored))[order])
+```
+
+``` {r}
+control <- trainControl(method = "cv", number = 5)
+set.seed(442)
+train_nn <- train(Gls ~ Sh + SoT + PKatt + xG + npxG + TklMid.3rd + PressMid.3rd + Int,
+method = "nnet",
+linout=T,
+trControl = control,
+tuneGrid=expand.grid(size = c(3, 5, 10, 15),
+decay=c(0, 0.0001, .001, 0.1, 1)),
+maxit=1000,
+trace = F,
+data = train_fbref)
+```
+
+``` {r}
+train_nn$bestTune
+nn_fbref_cv <- nnet(Gls ~ Sh + SoT + PKatt + xG + npxG + TklMid.3rd + PressMid.3rd + Int, data = train_fbref, size = train_nn$bestTune$size,
+decay=train_nn$bestTune$decay, linout = TRUE, trace=F, maxit = 3000)
+
+library(NeuralNetTools)
+plotnet(nn_fbref_cv)
+
+# MSE
+pred_nn_cv <- predict(nn_fbref_cv, newdata = test_fbref, type="raw")
+mean((pred_nn_cv - test_fbref$Gls)^2)
+
+data.frame(V1=sort(varImp(nn_fbref_cv)$Overall, decreasing=TRUE), V2 = rownames(varImp(nn_fbref_cv))[order])
+```
+
+``` {r}
+# Deep NN:
+
+library(dplyr)
+library(keras)
+library(tensorflow)
+X_train = train_fbref[,c(3, 4, 7, 8, 9, 13, 17, 20)]
+Y_train = train_fbref[,2]
+model <- keras_model_sequential() 
+
+model %>%
+# Network architecture
+layer_dense(units = 64, activation = "relu", input_shape = ncol(X_train)) %>%
+layer_dropout(rate=0.3)  %>%
+layer_dense(units = 32, activation = "sigmoid") %>%
+layer_dense(units = 16, activation = "relu") %>%
+layer_dropout(rate=0.1)  %>%
+layer_dense(units = 1, activation = "linear") %>%
+compile(
+loss = 'mse', ## for multi-class categorical, -log-likelihood
+optimizer = optimizer_rmsprop(), ## mini-batch gradient descent,
+##each step using only a batch to get gradient
+metrics = 'mae')
+```
+
+``` {r}
+mymodel <- model %>%          
+fit(x = as.matrix(X_train), y = Y_train,
+             epochs = 100,
+             batch_size = 64,
+             validation_split = 0.2, 
+             verbose = FALSE)
+
+plot(mymodel)
+```
+
+``` {r}
+mymodel
+X_test = test_fbref[,c(3, 4, 7, 8, 9, 13, 17, 20)]
+Y_test = test_fbref[,2]
+
+model %>% evaluate(as.matrix(X_test), Y_test)
+
+pred_dnn <- model %>% predict(as.matrix(X_test))
+mean((Y_test - pred_dnn)^2) 
+
+plot(Y_test, pred_dnn) 
+plot(pred_aic, Y_test, main = "AIC Prediction vs Test output")
+```
+
+``` {r}
+summary(model)
+```
