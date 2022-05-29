@@ -5,7 +5,7 @@ output: html_document
 
 ```{r}
 set.seed(442)
-fbref = read.csv("EPL_data.csv")
+fbref = read.csv("data/fbref/EPL_data.csv")
 no_gk = fbref[fbref$Pos != "GK",]
 no_gk = no_gk[sample(1:nrow(no_gk)), ]
 no_gk = no_gk[-c(1, 2, 3, 5, 9, 10, 11, 14, 19, 24, 26)]
