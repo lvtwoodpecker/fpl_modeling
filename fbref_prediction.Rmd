@@ -137,4 +137,5 @@ plot(pred_aic, Y_test, main = "AIC Prediction vs Test output")
 
 ``` {r}
 summary(model)
+write.csv(pred_dnn, "points_prediction.csv")
 ```
